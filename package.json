@@ -1,15 +1,19 @@
 {
-  "name": "@microsoft/api-documenter",
-  "version": "7.7.19",
+  "name": "@mana/api-documenter",
+  "version": "1.0.0-automatic",
   "description": "Read JSON files from api-extractor, generate documentation pages",
   "repository": {
     "type": "git",
-    "url": "https://github.com/microsoft/rushstack/tree/master/apps/api-documenter"
+    "url": "https://github.com/johanblumenberg-symphony/api-documenter.git"
+  },
+  "publishConfig": {
+    "registry": "https://repo.symphony.com/artifactory/api/npm/npm-virtual-dev/"
   },
   "homepage": "https://api-extractor.com/",
   "license": "MIT",
   "scripts": {
-    "build": "gulp test --clean"
+    "build": "gulp test --clean",
+    "step-version": "step-version"
   },
   "bin": {
     "api-documenter": "./bin/api-documenter"
@@ -21,6 +25,7 @@
     "@microsoft/tsdoc": "0.12.19",
     "@rushstack/node-core-library": "3.19.7",
     "@rushstack/ts-command-line": "4.3.14",
+    "@symphony/rtc-builder": "^2.0.26",
     "colors": "~1.2.1",
     "html-creator": "^0.4.4",
     "js-yaml": "~3.13.1",
