@@ -1,5 +1,5 @@
 {
-  "name": "@mana/api-documenter",
+  "name": "@symphony/api-documenter",
   "version": "1.0.0-automatic",
   "description": "Read JSON files from api-extractor, generate documentation pages",
   "repository": {
