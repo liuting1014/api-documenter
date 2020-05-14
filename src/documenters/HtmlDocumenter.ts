@@ -50,6 +50,10 @@ import {
   a,
 } from '../html/HtmlEmitter';
 
+function isApiDeclaredItem(apiItem: ApiItem): apiItem is ApiDeclaredItem {
+  return apiItem instanceof ApiDeclaredItem;
+}
+
 /**
  * Renders API documentation in HTML format.
  */
@@ -99,13 +103,27 @@ export class HtmlDocumenter {
   }
 
   private _writeApiItemPage(apiItem: ApiItem): void {
+    const siblings = apiItem.getMergedSiblings();
+    const interfaces = siblings.filter(s => s.kind == ApiItemKind.Interface);
+    const namespaces = siblings.filter(s => s.kind == ApiItemKind.Namespace);
+
+    if (interfaces.length === 1 && namespaces.length === 1 && siblings.length === 2) {
+      if (apiItem.kind === ApiItemKind.Interface) {
+        this._writeApiItemPageWithSiblings([ ...interfaces, ...namespaces ]);
+      }
+    } else {
+      this._writeApiItemPageWithSiblings([ apiItem ]);
+    }
+  }
+
+  private _writeApiItemPageWithSiblings(apiItems: readonly ApiItem[]): void {
     const output: HtmlNode[] = [];
 
-    this._writeBreadcrumb(output, apiItem);
+    this._writeBreadcrumb(output, apiItems[0]);
 
-    const scopedName: string = apiItem.getScopedNameWithinPackage();
+    const scopedName: string = apiItems[0].getScopedNameWithinPackage();
 
-    switch (apiItem.kind) {
+    switch (apiItems[0].kind) {
       case ApiItemKind.Class:
         output.push(tag('h1', 'page-header', `${scopedName} class`));
         break;
@@ -133,8 +151,8 @@ export class HtmlDocumenter {
         output.push(tag('h1', 'page-header', `${scopedName} namespace`));
         break;
       case ApiItemKind.Package:
-        console.log(`Writing ${apiItem.displayName} package`);
-        const unscopedPackageName: string = PackageName.getUnscopedName(apiItem.displayName);
+        console.log(`Writing ${apiItems[0].displayName} package`);
+        const unscopedPackageName: string = PackageName.getUnscopedName(apiItems[0].displayName);
         output.push(tag('h1', 'page-header', `${unscopedPackageName} package`));
         break;
       case ApiItemKind.Property:
@@ -148,103 +166,95 @@ export class HtmlDocumenter {
         output.push(tag('h1', 'page-header', `${scopedName} variable`));
         break;
       default:
-        throw new Error('Unsupported API item kind: ' + apiItem.kind);
+        throw new Error('Unsupported API item kind: ' + apiItems[0].kind);
     }
 
-    if (ApiReleaseTagMixin.isBaseClassOf(apiItem)) {
-      if (apiItem.releaseTag === ReleaseTag.Beta)  {
-        this._writeBetaWarning(output);
-      }
+    if (apiItems.some(apiItem => ApiReleaseTagMixin.isBaseClassOf(apiItem) && apiItem.releaseTag === ReleaseTag.Beta)) {
+      this._writeBetaWarning(output);
     }
 
-    if (apiItem instanceof ApiDocumentedItem) {
-      const tsdocComment: DocComment | undefined = apiItem.tsdocComment;
+    apiItems.forEach(apiItem => {
+      if (apiItem instanceof ApiDocumentedItem) {
+        const tsdocComment: DocComment | undefined = apiItem.tsdocComment;
 
-      if (tsdocComment) {
+        if (tsdocComment) {
 
-/*
-        if (tsdocComment.deprecatedBlock) {
-          output.push(
-            new DocNoteBox({ configuration: this._tsdocConfiguration },
-              [
-                new DocParagraph({ configuration: this._tsdocConfiguration }, [
-                  new DocPlainText({
-                    configuration: this._tsdocConfiguration,
-                    text: 'Warning: This API is now obsolete. '
-                  })
-                ]),
-                ...tsdocComment.deprecatedBlock.content.nodes
-              ]
-            )
-          );
+  /*
+          if (tsdocComment.deprecatedBlock) {
+            output.push(
+              new DocNoteBox({ configuration: this._tsdocConfiguration },
+                [
+                  new DocParagraph({ configuration: this._tsdocConfiguration }, [
+                    new DocPlainText({
+                      configuration: this._tsdocConfiguration,
+                      text: 'Warning: This API is now obsolete. '
+                    })
+                  ]),
+                  ...tsdocComment.deprecatedBlock.content.nodes
+                ]
+              )
+            );
+          }
+  */
+
+          output.push(tag('div', 'summary', this._createDocNodes(tsdocComment.summarySection.nodes)));
         }
-*/
-
-        output.push(tag('div', 'summary', this._createDocNodes(tsdocComment.summarySection.nodes)));
       }
-    }
+    });
 
-    if (apiItem instanceof ApiDeclaredItem) {
-      if (apiItem.excerpt.text.length > 0) {
-        output.push(tag('div', 'signature-heading', 'Signature'));
-        output.push(tag('pre', 'signature', apiItem.getExcerptWithModifiers()));
-      }
+    const signatures = apiItems.filter(isApiDeclaredItem).filter(apiItem => apiItem.excerpt.text.length > 0);
+    if (signatures.length > 0) {
+      output.push(tag('div', 'signature-heading', 'Signature'));
     }
+    signatures.forEach(apiItem => {
+      output.push(tag('pre', 'signature', apiItem.getExcerptWithModifiers()));
+    });
 
-    let appendRemarks: boolean = true;
-    switch (apiItem.kind) {
-      case ApiItemKind.Class:
-      case ApiItemKind.Interface:
-      case ApiItemKind.Namespace:
-      case ApiItemKind.Package:
-        this._writeRemarksSection(output, apiItem);
-        appendRemarks = false;
-        break;
-    }
-
-    switch (apiItem.kind) {
-      case ApiItemKind.Class:
-        this._writeClassTables(output, apiItem as ApiClass);
-        break;
-      case ApiItemKind.Enum:
-        this._writeEnumTables(output, apiItem as ApiEnum);
-        break;
-      case ApiItemKind.Interface:
-        this._writeInterfaceTables(output, apiItem as ApiInterface);
-        break;
-      case ApiItemKind.Constructor:
-      case ApiItemKind.ConstructSignature:
-      case ApiItemKind.Method:
-      case ApiItemKind.MethodSignature:
-      case ApiItemKind.Function:
-        this._writeParameterTables(output, apiItem as ApiParameterListMixin);
-        this._writeThrowsSection(output, apiItem);
-        break;
-      case ApiItemKind.Namespace:
-        this._writePackageOrNamespaceTables(output, apiItem as ApiNamespace);
-        break;
-      case ApiItemKind.Model:
-        this._writeModelTable(output, apiItem as ApiModel);
-        break;
-      case ApiItemKind.Package:
-        this._writePackageOrNamespaceTables(output, apiItem as ApiPackage);
-        break;
-      case ApiItemKind.Property:
-      case ApiItemKind.PropertySignature:
-        break;
-      case ApiItemKind.TypeAlias:
-        break;
-      case ApiItemKind.Variable:
-        break;
-      default:
-        throw new Error('Unsupported API item kind: ' + apiItem.kind);
-    }
-
-    if (appendRemarks) {
+    apiItems.forEach(apiItem => {
       this._writeRemarksSection(output, apiItem);
-    }
+    });
 
-    const filename: string = path.join(this._outputFolder, this._getFilenameForApiItem(apiItem));
+    apiItems.forEach(apiItem => {
+      switch (apiItem.kind) {
+        case ApiItemKind.Class:
+          this._writeClassTables(output, apiItem as ApiClass);
+          break;
+        case ApiItemKind.Enum:
+          this._writeEnumTables(output, apiItem as ApiEnum);
+          break;
+        case ApiItemKind.Interface:
+          this._writeInterfaceTables(output, apiItem as ApiInterface);
+          break;
+        case ApiItemKind.Constructor:
+        case ApiItemKind.ConstructSignature:
+        case ApiItemKind.Method:
+        case ApiItemKind.MethodSignature:
+        case ApiItemKind.Function:
+          this._writeParameterTables(output, apiItem as ApiParameterListMixin);
+          this._writeThrowsSection(output, apiItem);
+          break;
+        case ApiItemKind.Namespace:
+          this._writePackageOrNamespaceTables(output, apiItem as ApiNamespace);
+          break;
+        case ApiItemKind.Model:
+          this._writeModelTable(output, apiItem as ApiModel);
+          break;
+        case ApiItemKind.Package:
+          this._writePackageOrNamespaceTables(output, apiItem as ApiPackage);
+          break;
+        case ApiItemKind.Property:
+        case ApiItemKind.PropertySignature:
+          break;
+        case ApiItemKind.TypeAlias:
+          break;
+        case ApiItemKind.Variable:
+          break;
+        default:
+          throw new Error('Unsupported API item kind: ' + apiItem.kind);
+      }
+    });
+
+    const filename: string = path.join(this._outputFolder, this._getFilenameForApiItem(apiItems[0]));
     let pageContent = emit([ 'styles.css' ], [
       tag('header', [
         tag('div', 'header-top', [

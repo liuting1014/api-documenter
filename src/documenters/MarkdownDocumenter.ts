@@ -59,6 +59,10 @@ import {
 import { DocumenterConfig } from './DocumenterConfig';
 import { MarkdownDocumenterAccessor } from '../plugin/MarkdownDocumenterAccessor';
 
+function isApiDeclaredItem(apiItem: ApiItem): apiItem is ApiDeclaredItem {
+  return apiItem instanceof ApiDeclaredItem;
+}
+
 /**
  * Renders API documentation in the Markdown file format.
  * For more info:  https://en.wikipedia.org/wiki/Markdown
@@ -108,14 +112,28 @@ export class MarkdownDocumenter {
   }
 
   private _writeApiItemPage(apiItem: ApiItem): void {
+    const siblings = apiItem.getMergedSiblings();
+    const interfaces = siblings.filter(s => s.kind == ApiItemKind.Interface);
+    const namespaces = siblings.filter(s => s.kind == ApiItemKind.Namespace);
+
+    if (interfaces.length === 1 && namespaces.length === 1 && siblings.length === 2) {
+      if (apiItem.kind === ApiItemKind.Interface) {
+        this._writeApiItemPageWithSiblings([ ...interfaces, ...namespaces ]);
+      }
+    } else {
+      this._writeApiItemPageWithSiblings([ apiItem ]);
+    }
+  }
+
+  private _writeApiItemPageWithSiblings(apiItems: readonly ApiItem[]): void {
     const configuration: TSDocConfiguration = this._tsdocConfiguration;
     const output: DocSection = new DocSection({ configuration: this._tsdocConfiguration });
 
-    this._writeBreadcrumb(output, apiItem);
+    this._writeBreadcrumb(output, apiItems[0]);
 
-    const scopedName: string = apiItem.getScopedNameWithinPackage();
+    const scopedName: string = apiItems[0].getScopedNameWithinPackage();
 
-    switch (apiItem.kind) {
+    switch (apiItems[0].kind) {
       case ApiItemKind.Class:
         output.appendNode(new DocHeading({ configuration, title: `${scopedName} class` }));
         break;
@@ -143,8 +161,8 @@ export class MarkdownDocumenter {
         output.appendNode(new DocHeading({ configuration, title: `${scopedName} namespace` }));
         break;
       case ApiItemKind.Package:
-        console.log(`Writing ${apiItem.displayName} package`);
-        const unscopedPackageName: string = PackageName.getUnscopedName(apiItem.displayName);
+        console.log(`Writing ${apiItems[0].displayName} package`);
+        const unscopedPackageName: string = PackageName.getUnscopedName(apiItems[0].displayName);
         output.appendNode(new DocHeading({ configuration, title: `${unscopedPackageName} package` }));
         break;
       case ApiItemKind.Property:
@@ -158,115 +176,107 @@ export class MarkdownDocumenter {
         output.appendNode(new DocHeading({ configuration, title: `${scopedName} variable` }));
         break;
       default:
-        throw new Error('Unsupported API item kind: ' + apiItem.kind);
+        throw new Error('Unsupported API item kind: ' + apiItems[0].kind);
     }
 
-    if (ApiReleaseTagMixin.isBaseClassOf(apiItem)) {
-      if (apiItem.releaseTag === ReleaseTag.Beta)  {
-        this._writeBetaWarning(output);
-      }
+    if (apiItems.some(apiItem => ApiReleaseTagMixin.isBaseClassOf(apiItem) && apiItem.releaseTag === ReleaseTag.Beta)) {
+      this._writeBetaWarning(output);
     }
 
-    if (apiItem instanceof ApiDocumentedItem) {
-      const tsdocComment: DocComment | undefined = apiItem.tsdocComment;
+    apiItems.forEach(apiItem => {
+      if (apiItem instanceof ApiDocumentedItem) {
+        const tsdocComment: DocComment | undefined = apiItem.tsdocComment;
 
-      if (tsdocComment) {
+        if (tsdocComment) {
 
-        if (tsdocComment.deprecatedBlock) {
-          output.appendNode(
-            new DocNoteBox({ configuration: this._tsdocConfiguration },
-              [
-                new DocParagraph({ configuration: this._tsdocConfiguration }, [
-                  new DocPlainText({
-                    configuration: this._tsdocConfiguration,
-                    text: 'Warning: This API is now obsolete. '
-                  })
-                ]),
-                ...tsdocComment.deprecatedBlock.content.nodes
-              ]
-            )
-          );
+          if (tsdocComment.deprecatedBlock) {
+            output.appendNode(
+              new DocNoteBox({ configuration: this._tsdocConfiguration },
+                [
+                  new DocParagraph({ configuration: this._tsdocConfiguration }, [
+                    new DocPlainText({
+                      configuration: this._tsdocConfiguration,
+                      text: 'Warning: This API is now obsolete. '
+                    })
+                  ]),
+                  ...tsdocComment.deprecatedBlock.content.nodes
+                ]
+              )
+            );
+          }
+
+          this._appendSection(output, tsdocComment.summarySection);
         }
-
-        this._appendSection(output, tsdocComment.summarySection);
       }
-    }
+    });
 
-    if (apiItem instanceof ApiDeclaredItem) {
-      if (apiItem.excerpt.text.length > 0) {
-        output.appendNode(
-          new DocParagraph({ configuration }, [
-            new DocEmphasisSpan({ configuration, bold: true}, [
-              new DocPlainText({ configuration, text: 'Signature:' })
-            ])
+    const signatures = apiItems.filter(isApiDeclaredItem).filter(apiItem => apiItem.excerpt.text.length > 0);
+    if (signatures.length > 0) {
+      output.appendNode(
+        new DocParagraph({ configuration }, [
+          new DocEmphasisSpan({ configuration, bold: true}, [
+            new DocPlainText({ configuration, text: 'Signature:' })
           ])
-        );
-        output.appendNode(
-          new DocFencedCode({ configuration, code: apiItem.getExcerptWithModifiers(), language: 'typescript' })
-        );
+        ])
+      );
+    }
+    signatures.forEach(apiItem => {
+      output.appendNode(
+        new DocFencedCode({ configuration, code: apiItem.getExcerptWithModifiers(), language: 'typescript' })
+      );
+    });
+
+    apiItems.forEach(apiItem => {
+      this._writeRemarksSection(output, apiItem);
+    });
+
+    apiItems.forEach(apiItem => {
+      switch (apiItem.kind) {
+        case ApiItemKind.Class:
+          this._writeClassTables(output, apiItem as ApiClass);
+          break;
+        case ApiItemKind.Enum:
+          this._writeEnumTables(output, apiItem as ApiEnum);
+          break;
+        case ApiItemKind.Interface:
+          this._writeInterfaceTables(output, apiItem as ApiInterface);
+          break;
+        case ApiItemKind.Constructor:
+        case ApiItemKind.ConstructSignature:
+        case ApiItemKind.Method:
+        case ApiItemKind.MethodSignature:
+        case ApiItemKind.Function:
+          this._writeParameterTables(output, apiItem as ApiParameterListMixin);
+          this._writeThrowsSection(output, apiItem);
+          break;
+        case ApiItemKind.Namespace:
+          this._writePackageOrNamespaceTables(output, apiItem as ApiNamespace);
+          break;
+        case ApiItemKind.Model:
+          this._writeModelTable(output, apiItem as ApiModel);
+          break;
+        case ApiItemKind.Package:
+          this._writePackageOrNamespaceTables(output, apiItem as ApiPackage);
+          break;
+        case ApiItemKind.Property:
+        case ApiItemKind.PropertySignature:
+          break;
+        case ApiItemKind.TypeAlias:
+          break;
+        case ApiItemKind.Variable:
+          break;
+        default:
+          throw new Error('Unsupported API item kind: ' + apiItem.kind);
       }
-    }
+    });
 
-    let appendRemarks: boolean = true;
-    switch (apiItem.kind) {
-      case ApiItemKind.Class:
-      case ApiItemKind.Interface:
-      case ApiItemKind.Namespace:
-      case ApiItemKind.Package:
-        this._writeRemarksSection(output, apiItem);
-        appendRemarks = false;
-        break;
-    }
-
-    switch (apiItem.kind) {
-      case ApiItemKind.Class:
-        this._writeClassTables(output, apiItem as ApiClass);
-        break;
-      case ApiItemKind.Enum:
-        this._writeEnumTables(output, apiItem as ApiEnum);
-        break;
-      case ApiItemKind.Interface:
-        this._writeInterfaceTables(output, apiItem as ApiInterface);
-        break;
-      case ApiItemKind.Constructor:
-      case ApiItemKind.ConstructSignature:
-      case ApiItemKind.Method:
-      case ApiItemKind.MethodSignature:
-      case ApiItemKind.Function:
-        this._writeParameterTables(output, apiItem as ApiParameterListMixin);
-        this._writeThrowsSection(output, apiItem);
-        break;
-      case ApiItemKind.Namespace:
-        this._writePackageOrNamespaceTables(output, apiItem as ApiNamespace);
-        break;
-      case ApiItemKind.Model:
-        this._writeModelTable(output, apiItem as ApiModel);
-        break;
-      case ApiItemKind.Package:
-        this._writePackageOrNamespaceTables(output, apiItem as ApiPackage);
-        break;
-      case ApiItemKind.Property:
-      case ApiItemKind.PropertySignature:
-        break;
-      case ApiItemKind.TypeAlias:
-        break;
-      case ApiItemKind.Variable:
-        break;
-      default:
-        throw new Error('Unsupported API item kind: ' + apiItem.kind);
-    }
-
-    if (appendRemarks) {
-    this._writeRemarksSection(output, apiItem);
-    }
-
-    const filename: string = path.join(this._outputFolder, this._getFilenameForApiItem(apiItem));
+    const filename: string = path.join(this._outputFolder, this._getFilenameForApiItem(apiItems[0]));
     const stringBuilder: StringBuilder = new StringBuilder();
 
     stringBuilder.append('<!-- Do not edit this file. It is automatically generated by API Documenter. -->\n\n');
 
     this._markdownEmitter.emit(stringBuilder, output, {
-      contextApiItem: apiItem,
+      contextApiItem: apiItems[0],
       onGetFilenameForApiItem: (apiItemForFilename: ApiItem) => {
         return this._getLinkFilenameForApiItem(apiItemForFilename);
       }
@@ -277,7 +287,7 @@ export class MarkdownDocumenter {
     if (this._pluginLoader.markdownDocumenterFeature) {
       // Allow the plugin to customize the pageContent
       const eventArgs: IMarkdownDocumenterFeatureOnBeforeWritePageArgs = {
-        apiItem: apiItem,
+        apiItem: apiItems[0],
         outputFilename: filename,
         pageContent: pageContent
       };
