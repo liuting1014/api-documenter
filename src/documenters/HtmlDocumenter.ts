@@ -12,7 +12,8 @@ import {
   DocNode,
   DocPlainText,
   DocCodeSpan,
-  DocLinkTag
+  DocLinkTag,
+  DocEscapedText
 } from '@microsoft/tsdoc';
 import {
   ApiModel,
@@ -755,6 +756,9 @@ export class HtmlDocumenter {
         case DocNodeKind.CodeSpan:
           const code = node as DocCodeSpan;
           return tag('code', code.code);
+        case DocNodeKind.EscapedText:
+          const escapedText = node as DocEscapedText;
+          return tag('span', escapedText.decodedText);
         case DocNodeKind.LinkTag:
           const link = node as DocLinkTag;
           if (link.urlDestination) {
