@@ -212,7 +212,7 @@ export class HtmlDocumenter {
       output.push(tag('div', 'signature-heading', 'Signature'));
     }
     signatures.forEach(apiItem => {
-      output.push(tag('pre', 'signature', apiItem.getExcerptWithModifiers()));
+      output.push(tag('pre', 'signature', apiItem.getExcerptWithModifiers().replace(/>/g, '&gt').replace(/</g, '&lt')));
     });
 
     apiItems.forEach(apiItem => {
