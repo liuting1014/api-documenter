@@ -95,6 +95,10 @@ export class HtmlDocumenter {
       sourcePath: require.resolve('../html/styles.css'),
       destinationPath: path.join(outputFolder, 'styles.css'),
     });
+    FileSystem.copyFile({
+      sourcePath: require.resolve('../html/logo.png'),
+      destinationPath: path.join(outputFolder, 'logo.png'),
+    });
 
     this._writeApiItemPage(this._apiModel);
 
