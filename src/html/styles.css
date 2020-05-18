@@ -103,6 +103,10 @@ td, th {
     padding: 5px;
 }
 
+td > p {
+    margin: 0;
+}
+
 a.ref {
     color: #337ab7;
     text-decoration: none;
